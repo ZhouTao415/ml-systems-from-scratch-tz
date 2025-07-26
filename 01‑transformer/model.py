@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import math
+from typing import Optional, Tuple
 
 class TokenEmbedding(nn.Module):
     """
@@ -170,3 +171,156 @@ class FeedForwardBlock(nn.Module):
         x = self.dropout(x)
         x = self.linear2(x)
         return x
+
+class MultiHeadAttentionBlock(nn.Module):
+    """
+    Multi-Head Attention block from the Transformer architecture.
+
+    Args:
+        d_model (int): Dimension of the input embeddings (must be divisible by n_heads).
+        n_heads (int): Number of parallel attention heads.
+        dropout (float): Dropout probability applied to attention weights.
+
+    Attributes:
+        w_q, w_k, w_v (nn.Linear): Linear projections for query, key, value.
+        w_o (nn.Linear): Output linear projection after concatenating all heads.
+        dropout (nn.Dropout): Dropout layer for regularization.
+    """
+
+    def __init__(self, d_model: int, n_heads: int, dropout: float) -> None:
+        super().__init__()
+        assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
+
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads  # Dimension per head
+
+        self.w_q = nn.Linear(d_model, d_model)  # Query projection
+        self.w_k = nn.Linear(d_model, d_model)  # Key projection
+        self.w_v = nn.Linear(d_model, d_model)  # Value projection
+        self.w_o = nn.Linear(d_model, d_model)  # Output projection
+
+        self.dropout = nn.Dropout(dropout)
+    
+    @staticmethod  # This method does not depend on the class instance; it can be called as MultiHeadAttentionBlock.attention_score(...)
+    def attention(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        mask: Optional[torch.Tensor],
+        dropout: Optional[nn.Dropout]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute scaled dot-product attention.
+
+        Args:
+            query (Tensor): Query tensor of shape (batch_size, n_heads, seq_len, d_k)
+            key (Tensor): Key tensor of shape (batch_size, n_heads, seq_len, d_k)
+            value (Tensor): Value tensor of shape (batch_size, n_heads, seq_len, d_v)
+            mask (Tensor, optional): Attention mask of shape (batch_size, 1, 1, seq_len) or similar, with 0 for masked positions
+            dropout (nn.Dropout, optional): Dropout module applied on attention weights
+
+        Returns:
+            Tuple[Tensor, Tensor]:
+                - Output tensor after applying attention, shape (batch_size, n_heads, seq_len, d_v)
+                - Attention weights (for visualization), shape (batch_size, n_heads, seq_len, seq_len)
+        """
+        d_k = query.shape[-1]  # Key/query dimension per head
+
+        # Compute raw attention scores: (Q • K^T) / sqrt(d_k)
+        # (B, h, L_q, d_k) @ (B, h, d_k, L_k) -> (B, h, L_q, L_k)
+        attention_scores = (query @ key.transpose(-2, -1)) / math.sqrt(d_k)
+
+        # Apply mask: fill masked positions with large negative number so softmax ~ 0
+        if mask is not None:
+            attention_scores = attention_scores.masked_fill(mask == 0, -1e9)
+
+        # Normalize scores to probabilities
+        attention_weights = attention_scores.softmax(dim=-1)
+
+        # Optionally apply dropout to attention weights
+        if dropout is not None:
+            attention_weights = dropout(attention_weights)
+
+        # Weighted sum of values: (B, h, L_q, L_k) @ (B, h, L_k, d_v) -> (B, h, L_q, d_v)
+        output = attention_weights @ value
+
+        return output, attention_weights
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        """
+        Apply multi-head attention to the input.
+
+        Args:
+            q, k, v (Tensor): Input tensors of shape (Batch, seq_len, d_model)
+            mask (Tensor, optional): Mask tensor
+                if we want some words not to interact with others, we mask them
+                and with very small value, exp with softmax will be 0
+
+        Returns:
+            Tensor: Output of shape (Batch, seq_len, d_model)
+        """
+        B, L, _ = q.size()
+        # Linear projections: (Batch, seq_len, d_model) -> (Batch, seq_len, d_model)
+        query = self.w_q(q)
+        key   = self.w_k(k)
+        value = self.w_v(v)
+        
+        # Reshape and transpose for multi-head attention:
+        # (Batch, seq_len, d_model) → (Batch, seq_len, n_heads, d_k) → (Batch, n_heads, seq_len, d_k)
+        # Transpose to move n_heads forward so that each attention head attends to the full sequence (seq_len)
+        # Each head processes the entire sentence, but focuses on a different subspace of the embedding (d_k)
+        # query = query.view(query.shape[0], query.shape[1], self.n_heads, self.d_k).transpose(1, 2) 
+        # key   = key.view(key.shape[0], key.shape[1], self.n_heads, self.d_k).transpose(1, 2)
+        # value = value.view(value.shape[0], value.shape[1], self.n_heads, self.d_k).transpose(1, 2)
+        query = query.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
+        key = key.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
+        value = value.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
+        
+        # Compute attention
+        x, attentions_scores = MultiHeadAttentionBlock.attention(query, key, value, mask, self.dropout)
+
+        # (Batch, n_heads, seq_len, d_k) → (Batch, seq_len, n_heads, d_k) → (Batch, seq_len, d_model)
+        # Transpose to bring seq_len next to batch for output shape
+        # Use .contiguous() to ensure the tensor is stored in contiguous memory before reshaping
+        # -1 lets PyTorch automatically infer the seq_len dimension during .view()
+
+        x = x.transpose(1, 2).contiguous().view(B, -1, self.n_heads * self.d_k)
+
+        # (Batch, seq_len, d_model) -> (Batch, seq_len, d_model)
+        return self.w_o(x)
+
+class ResidualConnection(nn.Module):
+    """
+    Implements a residual connection followed by layer normalization:
+        x -> LayerNorm(x) -> Sublayer -> Dropout -> Add(x)
+
+    This is the Pre-Norm variant used in modern Transformer implementations.
+
+    Args:
+        dropout (float): Dropout probability applied after the sublayer.
+    """
+
+    def __init__(self, d_model: int, dropout: float) -> None:
+        super().__init__()
+        self.norm = LayerNormalization(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, sublayer: Callable[[torch.Tensor], torch.Tensor]) -> torch.Tensor:
+        """
+        Apply residual connection to any sublayer with the same input/output shape.
+
+        Args:
+            x (Tensor): Input tensor of shape (batch_size, seq_len, d_model)
+            sublayer (Callable): A function/layer taking and returning a tensor of the same shape.
+
+        Returns:
+            Tensor: Output tensor after applying norm -> sublayer -> dropout -> residual add
+        """
+        return x + self.dropout(sublayer(self.norm(x)))
