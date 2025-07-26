@@ -87,3 +87,86 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:, :x.size(1), :].detach()
 
         return self.dropout(x)
+
+class LayerNormalization(nn.Module):
+    """
+    Custom implementation of Layer Normalization.
+    \hat{x}_j = (x_j - μ_j) / sqrt(σ_j² + ε)
+    output = γ * \hat{x} + β
+    Normalizes inputs across the last dimension and applies learnable scale (gamma) and bias (beta).
+
+    Attributes:
+        eps (float): Small constant added to the denominator for numerical stability.
+        alpha (nn.Parameter): Learnable scaling factor (gamma), shape (1,).
+        bias (nn.Parameter): Learnable bias term (beta), shape (1,).
+    """
+    def __init__(self, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.eps = eps
+
+        # Initialize learnable parameters:
+        # alpha (γ): scales normalized values
+        # bias (β): shifts normalized values
+        self.alpha = nn.Parameter(torch.ones(1))     # γ (scale)
+        self.bias = nn.Parameter(torch.zeros(1))     # β (bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply layer normalization on the last dimension of the input tensor.
+
+        Args:
+            x (Tensor): Input tensor of shape (..., features)
+
+        Returns:
+            Tensor: Layer-normalized output with same shape as input.
+        """
+        # Compute mean and std over the last dimension
+        mean = x.mean(dim=-1, keepdim=True)
+        std = x.std(dim=-1, keepdim=True)
+
+        # Normalize and apply learnable affine transform
+        return self.alpha * (x - mean) / (std + self.eps) + self.bias
+
+class FeedForwardBlock(nn.Module):
+    """
+    Position-wise Feed-Forward Network used in Transformer blocks.
+
+    Consists of two linear transformations with a ReLU activation in between:
+        FFN(x) = W2 * ReLU(W1 * x + b1) + b2
+
+    Args:
+        d_model (int): Input and output dimension of the model.
+        d_ff (int): Hidden layer size in the feed-forward network (typically larger than d_model, e.g., 2048).
+        dropout (float): Dropout probability applied after the activation.
+
+    Attributes:
+        linear1 (nn.Linear): First linear layer (d_model -> d_ff).
+        dropout (nn.Dropout): Dropout layer.
+        linear2 (nn.Linear): Second linear layer (d_ff -> d_model).
+    """
+    def __init__(self, d_model: int, d_ff: int, dropout: float) -> None:
+        super().__init__()
+        self.linear1 = nn.Linear(d_model, d_ff)      # W1 and b1
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(d_ff, d_model)      # W2 and b2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the feed-forward block.
+
+        Args:
+            x (Tensor): Input tensor of shape (batch_size, seq_len, d_model)
+
+        Returns:
+            Tensor: Output tensor of the same shape as input (batch_size, seq_len, d_model)
+        """
+        # [Batch, seq_len, d_model] -> [Batch, seq_len, d_ff] -> [Batch, seq_len, d_model]
+        # Step 1: Project to higher dimension
+        # Step 2: Apply ReLU activation
+        # Step 3: Apply dropout
+        # Step 4: Project back to d_model
+        x = self.linear1(x)
+        x = torch.relu(x)
+        x = self.dropout(x)
+        x = self.linear2(x)
+        return x
