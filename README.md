@@ -7,7 +7,6 @@
 [![PyTorch](https://img.shields.io/badge/pytorch-2.x-red.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> 本仓库为个人学习笔记，面向中英双语读者。敬请斧正。
 
 ---
 
