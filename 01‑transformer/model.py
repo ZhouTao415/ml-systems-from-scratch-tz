@@ -307,12 +307,12 @@ class ResidualConnection(nn.Module):
         dropout (float): Dropout probability applied after the sublayer.
     """
 
-    def __init__(self, d_model: int, dropout: float) -> None:
+    def __init__(self, dropout: float) -> None:
         super().__init__()
-        self.norm = LayerNormalization(d_model)
+        self.norm = LayerNormalization()
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, sublayer: Callable[[torch.Tensor], torch.Tensor]) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, sublayer: nn.Module) -> torch.Tensor:
         """
         Apply residual connection to any sublayer with the same input/output shape.
 
@@ -324,3 +324,51 @@ class ResidualConnection(nn.Module):
             Tensor: Output tensor after applying norm -> sublayer -> dropout -> residual add
         """
         return x + self.dropout(sublayer(self.norm(x)))
+
+class EncoderBlock(nn.Module):
+    """
+    A single Transformer encoder block consisting of:
+    - Multi-head self-attention layer
+    - Feed-forward network (FFN)
+    - Two residual connections with layer normalization (Pre-Norm)
+    """
+
+    def __init__(
+        self,
+        self_attention_block: MultiHeadAttentionBlock,
+        feed_forward_block: FeedForwardBlock,
+        dropout: float
+    ) -> None:
+        super().__init__()
+        self.self_attention_block = self_attention_block
+        self.feed_forward_block = feed_forward_block
+        self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(2)])
+
+    def forward(self, x: torch.Tensor, src_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # First residual: Self-attention
+        x = self.residual_connections[0](
+            x,
+            lambda x: self.self_attention_block(x, x, x, src_mask)
+        )
+
+        # Second residual: Feed-forward
+        x = self.residual_connections[1](x, self.feed_forward_block)
+        return x
+
+class Encoder(nn.Module):
+    """
+    Transformer Encoder: stack of N encoder blocks with a final layer normalization.
+
+    Args:
+        layers (nn.ModuleList): List of EncoderBlock modules
+    """
+
+    def __init__(self, layers: nn.ModuleList) -> None:
+        super().__init__()
+        self.layers = layers
+        self.norm = LayerNormalization()
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
