@@ -72,6 +72,7 @@ model = build_transformer(
     src_seq_len=100,
     tgt_seq_len=100
 )
+```
 
 ## 🚧 Roadmap
 
