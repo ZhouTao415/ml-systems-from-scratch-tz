@@ -372,3 +372,99 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x, mask)
         return self.norm(x)
+    
+class DecoderBlock(nn.Module):
+    """
+    Transformer Decoder Block consisting of:
+    - Masked Multi-head Self-Attention (with causal mask)
+    - Cross Multi-head Attention over encoder outputs
+    - Feed Forward Network (FFN)
+    - Each sublayer is wrapped in a ResidualConnection (Pre-Norm style)
+    # src_mask is used to mask the encoder outputs, tgt_mask is used to mask the decoder inputs
+    # tgt_mask is typically a causal mask to prevent attending to future tokens in the sequence
+    """
+
+    def __init__(
+        self,
+        self_attention_block: MultiHeadAttentionBlock,
+        cross_attention_block: MultiHeadAttentionBlock,
+        feed_forward_block: FeedForwardBlock,
+        dropout: float
+    ) -> None:
+        super().__init__()
+        self.self_attention_block = self_attention_block
+        self.cross_attention_block = cross_attention_block
+        self.feed_forward_block = feed_forward_block
+        self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(3)])
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+        encoder_outputs: torch.Tensor,
+        src_mask: Optional[torch.Tensor],
+        tgt_mask: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        # Masked self-attention (causal mask)
+        x = self.residual_connections[0](
+            x, lambda x: self.self_attention_block(x, x, x, tgt_mask)
+        )
+
+        # Cross-attention over encoder outputs
+        x = self.residual_connections[1](
+            x, lambda x: self.cross_attention_block(x, encoder_outputs, encoder_outputs, src_mask)
+        )
+
+        # Feed-forward network
+        x = self.residual_connections[2](x, self.feed_forward_block)
+        return x
+
+class Decoder(nn.Module):
+    """
+    Transformer Decoder composed of a stack of DecoderBlocks and a final layer normalization.
+    """
+
+    def __init__(self, layers: nn.ModuleList) -> None:
+        super().__init__()
+        self.layers = layers
+        self.norm = LayerNormalization()
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        encoder_output: torch.Tensor,
+        src_mask: Optional[torch.Tensor],
+        tgt_mask: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x, encoder_output, src_mask, tgt_mask)
+        return self.norm(x)
+    
+class ProjectionLayer(nn.Module):
+    """
+    Projects decoder output embeddings into vocabulary logits for prediction.
+
+    Args:
+        d_model (int): Dimensionality of decoder outputs.
+        vocab_size (int): Number of tokens in the vocabulary.
+
+    Attributes:
+        proj (nn.Linear): Linear layer projecting from d_model to vocab_size.
+    """
+
+    def __init__(self, d_model: int, vocab_size: int) -> None:
+        super().__init__()
+        self.proj = nn.Linear(d_model, vocab_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass that returns log-probabilities over the vocabulary.
+
+        Args:
+            x (Tensor): Input tensor of shape (batch_size, seq_len, d_model)
+
+        Returns:
+            Tensor: Log-probabilities over the vocabulary,
+                    shape (batch_size, seq_len, vocab_size)
+        """
+        logits = self.proj(x)
+        return torch.log_softmax(logits, dim=-1)
