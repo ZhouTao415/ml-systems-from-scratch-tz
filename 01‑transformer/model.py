@@ -468,3 +468,92 @@ class ProjectionLayer(nn.Module):
         """
         logits = self.proj(x)
         return torch.log_softmax(logits, dim=-1)
+
+class Transformer(nn.Module):
+    """
+    Full Transformer model encapsulating:
+    - Token + positional embeddings
+    - Encoder and decoder blocks
+    - Final projection to vocabulary logits
+
+    Args:
+        encoder (Encoder): Transformer encoder stack
+        decoder (Decoder): Transformer decoder stack
+        src_embedded (TokenEmbedding): Token embedding for source input
+        tgt_embedded (TokenEmbedding): Token embedding for target input
+        src_pos (PositionalEncoding): Positional encoding for source input
+        tgt_pos (PositionalEncoding): Positional encoding for target input
+        projection_layer (ProjectionLayer): Final linear layer to vocab logits
+    """
+
+    def __init__(
+        self,
+        encoder: Encoder,
+        decoder: Decoder,
+        src_embedded: TokenEmbedding,
+        tgt_embedded: TokenEmbedding,
+        src_pos: PositionalEncoding,
+        tgt_pos: PositionalEncoding,
+        projection_layer: ProjectionLayer
+    ) -> None:
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.src_embedded = src_embedded
+        self.tgt_embedded = tgt_embedded
+        self.src_pos = src_pos
+        self.tgt_pos = tgt_pos
+        self.projection_layer = projection_layer
+
+    def encode(
+        self,
+        src: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Encode source sequence.
+
+        Args:
+            src (Tensor): Source token indices (B, src_len)
+            src_mask (Tensor, optional): Source attention mask (B, 1, 1, src_len)
+
+        Returns:
+            Tensor: Encoded representations (B, src_len, d_model)
+        """
+        src = self.src_pos(self.src_embedded(src))
+        return self.encoder(src, src_mask)
+    
+    def decode(
+        self,
+        encoder_outputs: torch.Tensor,
+        src_mask: Optional[torch.Tensor],
+        tgt: torch.Tensor,
+        tgt_mask: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        """
+        Decode target sequence using encoder outputs.
+
+        Args:
+            encoder_outputs (Tensor): Output from the encoder (B, src_len, d_model)
+            src_mask (Tensor, optional): Source mask for cross-attention
+            tgt (Tensor): Target token indices (B, tgt_len)
+            tgt_mask (Tensor, optional): Target mask for self-attention (causal)
+
+        Returns:
+            Tensor: Decoder outputs (B, tgt_len, d_model)
+        """
+        tgt = self.tgt_pos(self.tgt_embedded(tgt))
+        return self.decoder(tgt, encoder_outputs, src_mask, tgt_mask)
+    
+    def project(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Project decoder output to vocabulary logits.
+
+        Args:
+            x (Tensor): Decoder output (B, tgt_len, d_model)
+
+        Returns:
+            Tensor: Logits or log-probabilities (B, tgt_len, vocab_size)
+        """
+        return self.projection_layer(x)
+
