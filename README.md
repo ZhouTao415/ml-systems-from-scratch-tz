@@ -25,17 +25,17 @@ Inspired by [hkproj/pytorch-transformer](https://github.com/hkproj/pytorch-trans
 
 | Module | 🔍 Focus | Topics | Status |
 |--------|----------|--------|--------|
-| [`01-transformer`](./01-transformer) | Machine Translation | Multi-head Attention, PE, LayerNorm, Encoder-Decoder | ✅ Complete |
-| `02-flash-attention` | Efficient Attention | FlashAttention v2, Triton, CUDA kernels | 🚧 In progress |
-| `03-stable-diffusion` | Generative Models | UNet, V-prediction, latent noise | 🧪 Planning |
-| `04-multimodal-llm` | Vision-Language | ViT + LLM fusion, CLIP tokenization | 🧪 Planning |
-| `05-rlhf-dpo` | Alignment | PPO, DPO, reward modeling | 🧪 Planning |
+| [`01_transformer`](./01-transformer) | Machine Translation | Multi-head Attention, PE, LayerNorm, Encoder-Decoder | ✅ Complete |
+| `02_flash_attention` | Efficient Attention | FlashAttention v2, Triton, CUDA kernels | 🚧 In progress |
+| `03_stable_diffusion` | Generative Models | UNet, V-prediction, latent noise | 🧪 Planning |
+| `04_multimodal_llm` | Vision-Language | ViT + LLM fusion, CLIP tokenization | 🧪 Planning |
+| `05_rlhf_dpo` | Alignment | PPO, DPO, reward modeling | 🧪 Planning |
 
 ---
 
 ## 🧪 Example: Transformer for Translation
 
-The [`01-transformer`](./01-transformer) module includes:
+The [`01-transformer`](./01-transformer/) module includes:
 
 - Full implementation of Vaswani et al. (2017)
 - Trained from scratch on `opus_books` (HuggingFace datasets)
