@@ -39,6 +39,7 @@ This project is a complete **from-scratch implementation of the Transformer arch
 
 ```bash
 pip install torch datasets tokenizers
+```
 
 ## 🧪 Dataset: `opus_books`
 
