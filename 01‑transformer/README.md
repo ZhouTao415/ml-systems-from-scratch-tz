@@ -1,4 +1,5 @@
-# 🔤 Transformer from Scratch — PyTorch Implementation for Machine Translation
+# 🧠 Transformer from Scratch 
+# PyTorch Implementation for Machine Translation
 
 This project is a complete **from-scratch implementation of the Transformer architecture** as introduced in  
 ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762), using only standard PyTorch modules.
