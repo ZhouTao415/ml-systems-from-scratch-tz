@@ -611,9 +611,9 @@ def build_transformer(
         decoder_blocks.append(decoder_block)
 
     # Instantiate encoder and decoder
-    encoder = Encoder(encoder_blocks, d_model)
-    decoder = Decoder(decoder_blocks, d_model)
-
+    encoder = Encoder(nn.ModuleList(encoder_blocks))
+    decoder = Decoder(nn.ModuleList(decoder_blocks))
+    
     # Create the output projection layer
     projection_layer = ProjectionLayer(d_model, tgt_vocab_size)
 
@@ -627,7 +627,6 @@ def build_transformer(
         tgt_pos,
         projection_layer
     )
-
 
     # Apply Xavier (Glorot) initialization to all linear layers
     for p in transformer.parameters():
