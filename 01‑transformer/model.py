@@ -557,3 +557,81 @@ class Transformer(nn.Module):
         """
         return self.projection_layer(x)
 
+def build_transformer(
+    src_vocab_size: int,
+    tgt_vocab_size: int,
+    src_seq_len: int,
+    tgt_seq_len: int,
+    d_model: int = 512,
+    n_layers: int = 6,
+    n_heads: int = 8,
+    dropout: float = 0.1,
+    d_ff: int = 2048
+) -> Transformer:
+    """
+    Build a full Transformer model with encoder, decoder, embeddings, positional encodings, and projection layer.
+
+    Args:
+        src_vocab_size (int): Size of the source language vocabulary.
+        tgt_vocab_size (int): Size of the target language vocabulary.
+        src_seq_len (int): Maximum sequence length for source input.
+        tgt_seq_len (int): Maximum sequence length for target input.
+        d_model (int): Dimension of model embeddings.
+        n_layers (int): Number of encoder and decoder layers.
+        n_heads (int): Number of attention heads per layer.
+        dropout (float): Dropout rate used throughout the model.
+        d_ff (int): Hidden dimension of the feed-forward networks.
+
+    Returns:
+        Transformer: A fully constructed Transformer model.
+    """
+    # Create token embedding layers
+    src_embed = TokenEmbedding(d_model, src_vocab_size)
+    tgt_embed = TokenEmbedding(d_model, tgt_vocab_size)
+
+    # Create positional encoding layers
+    src_pos = PositionalEncoding(d_model, src_seq_len, dropout)
+    tgt_pos = PositionalEncoding(d_model, tgt_seq_len, dropout)
+
+    # Create the encoder blocks
+    encoder_blocks = []
+    for _ in range(n_layers):
+        encoder_self_attention_block = MultiHeadAttentionBlock(d_model, n_heads, dropout)
+        feed_forward_block = FeedForwardBlock(d_model, d_ff, dropout)
+        encoder_block = EncoderBlock(encoder_self_attention_block, feed_forward_block, dropout)
+        encoder_blocks.append(encoder_block)
+    
+    #  Create the decoder blocks
+    decoder_blocks = []
+    for _ in range(n_layers):
+        decoder_self_attention_block = MultiHeadAttentionBlock(d_model, n_heads, dropout)
+        decoder_cross_attention_block = MultiHeadAttentionBlock(d_model, n_heads, dropout)
+        feed_forward_block = FeedForwardBlock(d_model, d_ff, dropout)
+        decoder_block = DecoderBlock(decoder_self_attention_block, decoder_cross_attention_block, feed_forward_block, dropout)
+        decoder_blocks.append(decoder_block)
+
+    # Instantiate encoder and decoder
+    encoder = Encoder(encoder_blocks, d_model)
+    decoder = Decoder(decoder_blocks, d_model)
+
+    # Create the output projection layer
+    projection_layer = ProjectionLayer(d_model, tgt_vocab_size)
+
+    # Combine into full Transformer model
+    transformer = Transformer(
+        encoder,
+        decoder,
+        src_embed,
+        tgt_embed,
+        src_pos,
+        tgt_pos,
+        projection_layer
+    )
+
+
+    # Apply Xavier (Glorot) initialization to all linear layers
+    for p in transformer.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+
+    return transformer
