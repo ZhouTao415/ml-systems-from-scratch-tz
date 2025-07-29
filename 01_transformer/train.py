@@ -1,6 +1,8 @@
 from dataset import BilingualDataset, causal_mask
 from model import build_transformer
 
+from config import get_config, get_weights_file_path
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -12,6 +14,10 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
+from torch.utils.tensorboard import SummaryWriter
+
+import warnings
+from tqdm import tqdm
 from pathlib import Path
 
 def get_all_sentences(dataset, lang):
@@ -131,7 +137,7 @@ def get_ds(config):
         tgt_ids = tokenizer_tgt.encode(item['translation'][config['lange_tgt']]).ids
         max_len_src = max(max_len_src, len(src_ids))
         max_len_tgt = max(max_len_tgt, len(tgt_ids))
-    print(f"📏 Max source length: {max_len_src}, Max target length: {max_len_tgt}")
+    print(f"Max source length: {max_len_src}, Max target length: {max_len_tgt}")
 
     # Create DataLoaders
     train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True)
@@ -139,13 +145,108 @@ def get_ds(config):
 
     return train_loader, val_loader, tokenizer_src, tokenizer_tgt
 
-# Start to build the model
-def get_model(config, vocab_size_src, vocab_size_tgt):
+def get_model(config, vocab_size_src: int, vocab_size_tgt: int):
+    """
+    Builds and returns a Transformer model using the provided configuration and vocabulary sizes.
+
+    Args:
+        config (dict): Configuration dictionary with model parameters.
+        vocab_size_src (int): Vocabulary size of the source language.
+        vocab_size_tgt (int): Vocabulary size of the target language.
+
+    Returns:
+        nn.Module: An instance of the Transformer model.
+    """
     model = build_transformer(
-        vocab_size_src,
-        vocab_size_tgt,
-        config['seq_len'],
-        config['seq_len'],
-        config['d_model']
+        vocab_size_src=vocab_size_src,
+        vocab_size_tgt=vocab_size_tgt,
+        src_seq_len=config['seq_len'],
+        tgt_seq_len=config['seq_len'],
+        d_model=config['d_model']
     )
     return model
+
+def train_model(config):
+    # Define the device to use for training (GPU if available, otherwise CPU)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Using device: {device}')
+
+    Path(config['model_folder']).mkdir(parents=True, exist_ok=True)
+
+    train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt = get_ds(config)
+    model = get_model(config, tokenizer_src.get_vocab_size(), tokenizer_tgt.get_vocab_size())
+
+    # TensorBoard writer for logging
+    writer = SummaryWriter(config['experiment_name'])
+
+    # optimazer and loss function
+    optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'], eps=1e-9)
+
+    # when the system is restarted, we can resume training from a specific epoch
+    initial_epoch = 0
+    global_step = 0
+    if config['preload']:
+        model_filename = get_weights_file_path(config, config['preload'])
+        print(f'Preloading model from {model_filename}')
+        state = torch.load(model_filename)
+        initial_epoch = state['epoch'] + 1
+        optimizer.load_state_dict(state['optimizer_state_dict'])
+        global_step = state['global_step']
+
+    # we want to ignore the index 0, which is the [PAD] token
+    # label smoothing is a technique to make the model more robust
+    # evey highest probability token take 0.1 precent of the score and give it to the other tokens
+    loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer_src.token_to_id('[PAD]'), label_smoothing=0.1).to(device)
+
+    # train loop
+    for epoch in range(initial_epoch, config['num_epochs']):
+        model.train()
+        batch_iterator = tqdm(train_dataloader, desc= f'Processing epoch {(epoch + 1):02d}/{config["num_epochs"]}')
+
+        for batch in batch_iterator:
+
+            encoder_input = batch['encoder_input'].to(device) # （batch_size, seq_len)
+            decoder_input = batch['decoder_input'].to(device) #  (batch_size, seq_len)
+            encoder_mask = batch['encoder_mask'].to(device) # (batch_size, 1, 1, seq_len)
+            decoder_mask = batch['decoder_mask'].to(device) # (batch_size, 1, seq_len, seq_len)
+
+            # Run the tensor through the transformer model
+            encoder_output = model.encode(encoder_input, encoder_mask) # (batch_size, seq_len, d_model)
+            decoder_output = model.decode(encoder_output, encoder_mask, decoder_input, decoder_mask) #   (batch_size, seq_len, d_model)
+            proj_output = model.project(decoder_output) # (batch_size, seq_len, tgt_vocab_size)
+
+            # label: each dim tell us what is the position of the token in the vocabulary
+            label = batch['label'].to(device) #  [(batch_size, seq_len)]
+
+            # [batch_size, seq_len, tgt_vocab_size] -> [batch_size * seq_len, tgt_vocab_size]
+            loss = loss_fn(proj_output.view(-1, tokenizer_tgt.get_vocab_size()), label.view(-1))
+            batch_iterator.set_postfix({f"loss": f"{loss.item():6.3f}"}) # this show the loss in the progress bar
+
+            # Log the loss to TensorBoard
+            writer.add_scalar('train_loss', loss.item(), global_step)
+            writer.flush()
+
+            # Backpropagation
+            loss.backward()
+
+            # Update model parameters
+            optimizer.step()
+            optimizer.zero_grad()
+
+            #  the global step is used for tensorbaord to keep track of the loss
+            global_step += 1
+
+        # Save model weights after each epoch
+        model_filename = get_weights_file_path(config, f'{epoch + 1}:02d')
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'global_step': global_step
+        }, model_filename)
+
+if __name__ == '__main__':
+    warnings.filterwarnings("ignore")
+    config = get_config()
+    train_model(config)
+    print("Training complete. Check the 'weights' folder for saved model checkpoints.")
