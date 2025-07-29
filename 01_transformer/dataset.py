@@ -116,37 +116,35 @@ class BilingualDataset(Dataset):
         assert decoder_input.size(0) == self.seq_len, "Decoder input size mismatch"
         assert label.size(0) == self.seq_len, "Label size mismatch"
 
-        # encoder_mask:
-        # we are increasing the size of the encoder input sentence by adding padding tokens,
-        # but we dont want to these padding tokens to participate in the self-attention
-        # so we build a mask that these padding tokens will not be senn by the self-attention
-        # how can we build this mask?
-        # all token are not padding toekens are ok, padding tokens are not ok
-        encoder_mask = (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int()  # (1, 1, seq_len)
-        # causal mask for the decoder input:
-        #  we want to the word can only look at the previous words 
-        #  and each word can only look at non-padding words
-        # we only want the real words to participate in the self-attention
-        # we also dont want to each word to watch at wirds that come after it
-        # so onlu that word comes before it can be seen
-        
-        # Decoder mask:
-        # 1. Causal mask to prevent attending to future positions
-        # 2. Ignore [PAD] tokens
-        decoder_pad_mask = (decoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int() # (1, seq_len)
-        decoder_mask = decoder_pad_mask & causal_mask(decoder_input.size(0)) # (1, seq_len) & (1, seq_len, seq_len)
+        # === Encoder Mask ===
+        # Prevents attention from attending to [PAD] tokens in the encoder input.
+        # Shape: (1, 1, seq_len) — suitable for broadcasting over (batch_size, num_heads, seq_len)
+        encoder_mask = (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int()
+
+        # === Decoder Mask ===
+        # Combines two masks:
+        # 1. Padding mask: ignores [PAD] tokens in decoder input.
+        # 2. Causal mask: ensures that each token can only attend to itself and previous tokens (no future tokens).
+        decoder_pad_mask = (decoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int()  # (1, 1, seq_len)
+        decoder_mask = decoder_pad_mask & causal_mask(decoder_input.size(0))  # (1, seq_len, seq_len)
+
         return {
-            'encoder_input': encoder_input, # (seq_len)
-            'decoder_input': decoder_input, # (seq_len)
-            'encoder_mask': encoder_mask, # (1, 1, seq_len) ~ (batch_size, num_heads, seq_len)
-            'decoder_mask': decoder_mask,
-            'label': label, # (seq_len)
-            'src_text': src_text, 
-            'tgt_text': tgt_text  
+            'encoder_input': encoder_input,    # (seq_len,)
+            'decoder_input': decoder_input,    # (seq_len,)
+            'encoder_mask': encoder_mask,      # (1, 1, seq_len)
+            'decoder_mask': decoder_mask,      # (1, seq_len, seq_len)
+            'label': label,                    # (seq_len,)
+            'src_text': src_text,              # Original source sentence
+            'tgt_text': tgt_text               # Original target sentence
         }
-    
-def causal_mask(size):
-    # this returen all the values above the diagonal and everything below the diagonal is 0
-    # but we want the opposite, so we invert it
+
+def causal_mask(size: int) -> torch.Tensor:
+    """
+    Generates a lower-triangular (causal) mask for decoder self-attention.
+    Ensures position i can only attend to positions <= i.
+
+    Returns:
+        Tensor of shape (1, size, size), where True indicates allowed attention.
+    """
     mask = torch.tril(torch.ones(1, size, size), diagonal=1).type(torch.int)
     return mask == 0
