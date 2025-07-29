@@ -266,7 +266,8 @@ class MultiHeadAttentionBlock(nn.Module):
         Returns:
             Tensor: Output of shape (Batch, seq_len, d_model)
         """
-        B, L, _ = q.size()
+        # ++++ some problem hier ++++
+        B, L, _ = q.size() 
         # Linear projections: (Batch, seq_len, d_model) -> (Batch, seq_len, d_model)
         query = self.w_q(q)
         key   = self.w_k(k)
@@ -276,12 +277,12 @@ class MultiHeadAttentionBlock(nn.Module):
         # (Batch, seq_len, d_model) → (Batch, seq_len, n_heads, d_k) → (Batch, n_heads, seq_len, d_k)
         # Transpose to move n_heads forward so that each attention head attends to the full sequence (seq_len)
         # Each head processes the entire sentence, but focuses on a different subspace of the embedding (d_k)
-        # query = query.view(query.shape[0], query.shape[1], self.n_heads, self.d_k).transpose(1, 2) 
-        # key   = key.view(key.shape[0], key.shape[1], self.n_heads, self.d_k).transpose(1, 2)
-        # value = value.view(value.shape[0], value.shape[1], self.n_heads, self.d_k).transpose(1, 2)
-        query = query.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
-        key = key.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
-        value = value.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
+        query = query.view(query.shape[0], query.shape[1], self.n_heads, self.d_k).transpose(1, 2) 
+        key   = key.view(key.shape[0], key.shape[1], self.n_heads, self.d_k).transpose(1, 2)
+        value = value.view(value.shape[0], value.shape[1], self.n_heads, self.d_k).transpose(1, 2)
+        # query = query.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
+        # key = key.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
+        # value = value.view(B, L, self.n_heads, self.d_k).transpose(1, 2)
         
         # Compute attention
         x, attentions_scores = MultiHeadAttentionBlock.attention(query, key, value, mask, self.dropout)

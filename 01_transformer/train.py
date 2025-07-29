@@ -20,6 +20,141 @@ import warnings
 from tqdm import tqdm
 from pathlib import Path
 
+def greedy_decode(model, source, source_mask, tokenizer_tgt, max_len, device):
+    """
+    Perform greedy decoding for sequence generation.
+
+    Args:
+        model: Trained Transformer model.
+        source (Tensor): Source sequence tensor of shape (1, src_seq_len).
+        source_mask (Tensor): Source mask tensor of shape (1, 1, src_seq_len).
+        tokenizer_tgt: Tokenizer for the target language.
+        max_len (int): Maximum length of the generated sequence.
+        device: PyTorch device (CPU or GPU).
+
+    Returns:
+        Tensor of shape (seq_len,) — the decoded token indices.
+    """
+    sos_idx = tokenizer_tgt.token_to_id('[SOS]')
+    eos_idx = tokenizer_tgt.token_to_id('[EOS]')
+
+    # Precompute the encoder output and reuse it for every token we get form the decoder
+    encoder_output = model.encode(source, source_mask)  # (1, src_seq_len, d_model)
+    # How to inference
+    # 1. Start with SOS token
+    # 2. Decoder output the first token of the translated sentence
+    # 3. Use the decoder output as input for the next token
+    # 4. Repeat until EOS token is generated or max_len is reached
+    # Initialize the decoder input with SOS token
+    decoder_input = torch.empty(1, 1).fill_(sos_idx).type_as(source).to(device) # (1, 1)
+
+    while True:
+        if decoder_input.size(1) == max_len:
+            break
+            
+        # Create a causal mask to prevent attending to future tokens
+        decoder_mask = causal_mask(decoder_input.size(1)).type_as(source_mask).to(device) # (1, 1, seq_len, seq_len)
+        
+
+        # Calculate the output of the decoder
+        decoder_output  = model.decode(encoder_output, source_mask, decoder_input, decoder_mask)    # (1, seq_len, d_model)
+
+        # Get the next token 
+        prob = model.project(decoder_output[:, -1])  # (1, seq_len, tgt_vocab_size)
+        # Select the token with the highest probability (because it is greedy search)
+        _, next_token = torch.max(prob, dim=1) 
+
+        decoder_input = torch.cat([
+            decoder_input,
+            torch.empty(1, 1).type_as(source).fill_(next_token.item()).to(device),
+        ], dim=1)  # (1, seq_len + 1)
+
+        # Stop if we generate [EOS]
+        if next_token.item() == eos_idx:
+            break
+    
+    return decoder_input.squeeze(0)  # Remove the batch dimension, return (seq_len + 1,)
+
+def run_validation(
+    model,
+    validation_ds,
+    tokenizer_src,
+    tokenizer_tgt,
+    max_len,
+    device,
+    print_msg,
+    global_state,
+    writer,
+    num_examples=2
+):
+    """
+    Run greedy decoding on validation dataset and print predictions.
+
+    Args:
+        model: Trained Transformer model.
+        validation_ds: Validation DataLoader (batch_size = 1).
+        tokenizer_src: Source language tokenizer.
+        tokenizer_tgt: Target language tokenizer.
+        max_len (int): Maximum length for decoding.
+        device: torch.device to run inference on.
+        print_msg: Callable for printing (e.g., tqdm.write).
+        global_state (dict): Dictionary containing global step counter.
+        writer: TensorBoard SummaryWriter.
+        num_examples (int): Number of examples to visualize from validation set.
+    """
+    model.eval()
+    count = 0
+
+    # Collect examples for optional evaluation/reporting
+    source_sentences = []
+    expected_sentences = []
+    predicted_sentences = []
+
+    # Console formatting
+    console_width = 80
+
+    with torch.no_grad():
+        for batch in validation_ds:
+            count += 1
+
+            # Ensure batch size is 1
+            assert batch['encoder_input'].size(0) == 1, "Validation batch size must be 1 for inference."
+
+            # Move tensors to device
+            encoder_input = batch['encoder_input'].to(device)  # (1, seq_len)
+            encoder_mask = batch['encoder_mask'].to(device)    # (1, 1, 1, seq_len)
+
+            # Run greedy decoding
+            output_tokens = greedy_decode(
+                model,
+                encoder_input,
+                encoder_mask,
+                tokenizer_tgt,
+                max_len,
+                device
+            )  # (seq_len,)
+
+            # Decode results to human-readable text
+            src_sentence = batch['src_text'][0]  # string
+            tgt_sentence = batch['tgt_text'][0]  # string
+            pred_sentence = tokenizer_tgt.decode(output_tokens.cpu().numpy())
+
+            source_sentences.append(src_sentence)
+            expected_sentences.append(tgt_sentence)
+            predicted_sentences.append(pred_sentence)
+
+            # Display result
+            print_msg('-' * console_width)
+            print_msg(f'SOURCE   : {src_sentence}')
+            print_msg(f'EXPECTED : {tgt_sentence}')
+            print_msg(f'PREDICTED: {pred_sentence}')
+
+            if count >= num_examples:
+                break
+
+    # You can optionally log BLEU or write predictions to TensorBoard here
+
+
 def get_all_sentences(dataset, lang):
     """
     Generator that yields all sentences in a specific language from a dataset.
@@ -205,10 +340,11 @@ def train_model(config):
 
     # === Training Loop ===
     for epoch in range(initial_epoch, config['num_epochs']):
-        model.train()
+        
         batch_iterator = tqdm(train_dataloader, desc= f'Processing epoch {(epoch + 1):02d}/{config["num_epochs"]}')
 
         for batch in batch_iterator:
+            model.train()
             # Move batch data to device
             encoder_input = batch['encoder_input'].to(device) # （batch_size, seq_len)
             decoder_input = batch['decoder_input'].to(device) #  (batch_size, seq_len)
@@ -239,6 +375,19 @@ def train_model(config):
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+
+            run_validation(
+                model,
+                val_dataloader,
+                tokenizer_src,
+                tokenizer_tgt,
+                config['seq_len'],
+                device,
+                lambda msg: batch_iterator.write(msg),
+                global_step,
+                writer
+            )
+
 
             #  the global step is used for tensorbaord to keep track of the loss
             global_step += 1

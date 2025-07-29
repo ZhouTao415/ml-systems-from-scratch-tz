@@ -81,8 +81,8 @@ model = build_transformer(
 - [x] Encoder & Decoder Modules  
 - [x] Tokenizer Training & Serialization  
 - [x] Dataset Loading & Splitting  
-- [ ] Custom `TranslationDataset` with tokenization + tensor conversion  
-- [ ] `DataLoader` with padding + batching  
+- [x] Custom `TranslationDataset` with tokenization + tensor conversion  
+- [x] `DataLoader` with padding + batching  
 - [ ] Full training loop (`CrossEntropyLoss` + teacher forcing)  
 - [ ] Inference: `generate()` with greedy/beam search  
 - [ ] Attention Map Visualization (inspired by Harvard NLP)
