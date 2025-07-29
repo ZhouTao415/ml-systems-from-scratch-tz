@@ -60,8 +60,8 @@ from transformer import build_transformer
 
 # Load tokenizers and data
 config = {
-    "lange_src": "en",
-    "lange_tgt": "fr",
+    "_src": "en",
+    "lang_tgt": "fr",
     "tokenizer_file": "./tokenizers/tokenizer_{0}.json"
 }
 
