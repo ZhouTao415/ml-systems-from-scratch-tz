@@ -167,44 +167,49 @@ def get_model(config, vocab_size_src: int, vocab_size_tgt: int):
     return model
 
 def train_model(config):
-    # Define the device to use for training (GPU if available, otherwise CPU)
+    """Main training loop with checkpointing and logging."""
+
+    # Setup: device, model folder
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
-
     Path(config['model_folder']).mkdir(parents=True, exist_ok=True)
 
+    # Data & model
     train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt = get_ds(config)
     model = get_model(config, tokenizer_src.get_vocab_size(), tokenizer_tgt.get_vocab_size())
+    model = model.to(device)
 
-    # TensorBoard writer for logging
+    # TensorBoard logger
     writer = SummaryWriter(config['experiment_name'])
 
-    # optimazer and loss function
+    # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=config['lr'], eps=1e-9)
 
-    # when the system is restarted, we can resume training from a specific epoch
+    # Resume from checkpoint if specified
     initial_epoch = 0
     global_step = 0
     if config['preload']:
         model_filename = get_weights_file_path(config, config['preload'])
         print(f'Preloading model from {model_filename}')
         state = torch.load(model_filename)
-        initial_epoch = state['epoch'] + 1
+        model.load_state_dict(state['model_state_dict'])
         optimizer.load_state_dict(state['optimizer_state_dict'])
+        initial_epoch = state['epoch'] + 1
         global_step = state['global_step']
 
-    # we want to ignore the index 0, which is the [PAD] token
-    # label smoothing is a technique to make the model more robust
-    # evey highest probability token take 0.1 precent of the score and give it to the other tokens
-    loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer_src.token_to_id('[PAD]'), label_smoothing=0.1).to(device)
+    # Loss function (with label smoothing), ignore [PAD] token
+    loss_fn = nn.CrossEntropyLoss(
+        ignore_index=tokenizer_src.token_to_id('[PAD]'),
+        label_smoothing=0.1
+    ).to(device)
 
-    # train loop
+    # === Training Loop ===
     for epoch in range(initial_epoch, config['num_epochs']):
         model.train()
         batch_iterator = tqdm(train_dataloader, desc= f'Processing epoch {(epoch + 1):02d}/{config["num_epochs"]}')
 
         for batch in batch_iterator:
-
+            # Move batch data to device
             encoder_input = batch['encoder_input'].to(device) # （batch_size, seq_len)
             decoder_input = batch['decoder_input'].to(device) #  (batch_size, seq_len)
             encoder_mask = batch['encoder_mask'].to(device) # (batch_size, 1, 1, seq_len)
@@ -219,24 +224,26 @@ def train_model(config):
             label = batch['label'].to(device) #  [(batch_size, seq_len)]
 
             # [batch_size, seq_len, tgt_vocab_size] -> [batch_size * seq_len, tgt_vocab_size]
-            loss = loss_fn(proj_output.view(-1, tokenizer_tgt.get_vocab_size()), label.view(-1))
+            # Flatten for loss computation
+            loss = loss_fn(
+                proj_output.view(-1, tokenizer_tgt.get_vocab_size()),
+                label.view(-1)
+            )
             batch_iterator.set_postfix({f"loss": f"{loss.item():6.3f}"}) # this show the loss in the progress bar
 
-            # Log the loss to TensorBoard
+            # Log loss to TensorBoard
             writer.add_scalar('train_loss', loss.item(), global_step)
             writer.flush()
 
-            # Backpropagation
+           # === Backward & Optimize ===
             loss.backward()
-
-            # Update model parameters
             optimizer.step()
             optimizer.zero_grad()
 
             #  the global step is used for tensorbaord to keep track of the loss
             global_step += 1
 
-        # Save model weights after each epoch
+        # === Save checkpoint after each epoch ===
         model_filename = get_weights_file_path(config, f'{epoch + 1}:02d')
         torch.save({
             'epoch': epoch,
@@ -244,9 +251,10 @@ def train_model(config):
             'optimizer_state_dict': optimizer.state_dict(),
             'global_step': global_step
         }, model_filename)
+    print("✅ Training complete. Check the 'weights' folder for saved checkpoints.")
 
+# Entry point
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
     config = get_config()
     train_model(config)
-    print("Training complete. Check the 'weights' folder for saved model checkpoints.")
