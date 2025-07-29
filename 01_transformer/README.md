@@ -83,8 +83,8 @@ model = build_transformer(
 - [x] Dataset Loading & Splitting  
 - [x] Custom `TranslationDataset` with tokenization + tensor conversion  
 - [x] `DataLoader` with padding + batching  
-- [ ] Full training loop (`CrossEntropyLoss` + teacher forcing)  
-- [ ] Inference: `generate()` with greedy/beam search  
+- [x] Full training loop (`CrossEntropyLoss` + teacher forcing)  
+- [x] Inference: `generate()` with greedy/beam search  
 - [ ] Attention Map Visualization (inspired by Harvard NLP)
 
 ---
