@@ -84,8 +84,8 @@ def get_ds(config):
 
     Args:
         config (dict): Configuration dictionary. Expected keys:
-            - lange_src (str): Source language code (e.g., 'en')
-            - lange_tgt (str): Target language code (e.g., 'de')
+            - lang_src (str): Source language code (e.g., 'en')
+            - lang_tgt (str): Target language code (e.g., 'de')
             - tokenizer_file (str): Path template to save/load tokenizers
             - seq_len (int): Fixed input sequence length for model
             - batch_size (int): Batch size for training
@@ -99,12 +99,12 @@ def get_ds(config):
     """
     # Load translation dataset from HuggingFace Datasets
     ds_name = 'opus_books'
-    lang_pair = f"{config['lange_src']}-{config['lange_tgt']}"
+    lang_pair = f"{config['lang_src']}-{config['lang_tgt']}"
     ds_raw = load_dataset(ds_name, lang_pair, split='train')
 
     # Build or load tokenizers for both source and target languages
-    tokenizer_src = get_or_build_tokenizer(config, ds_raw, config['lange_src'])
-    tokenizer_tgt = get_or_build_tokenizer(config, ds_raw, config['lange_tgt'])
+    tokenizer_src = get_or_build_tokenizer(config, ds_raw, config['lang_src'])
+    tokenizer_tgt = get_or_build_tokenizer(config, ds_raw, config['lang_tgt'])
 
     # Split dataset: 90% training, 10% validation
     train_size = int(0.9 * len(ds_raw))
@@ -116,16 +116,16 @@ def get_ds(config):
         ds=train_raw,
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
-        src_lang=config['lange_src'],
-        tgt_lang=config['lange_tgt'],
+        src_lang=config['lang_src'],
+        tgt_lang=config['lang_tgt'],
         seq_len=config['seq_len']
     )
     val_ds = BilingualDataset(
         ds=val_raw,
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
-        src_lang=config['lange_src'],
-        tgt_lang=config['lange_tgt'],
+        src_lang=config['lang_src'],
+        tgt_lang=config['lang_tgt'],
         seq_len=config['seq_len']
     )
 
@@ -133,8 +133,8 @@ def get_ds(config):
     max_len_src = 0
     max_len_tgt = 0
     for item in ds_raw:
-        src_ids = tokenizer_src.encode(item['translation'][config['lange_src']]).ids
-        tgt_ids = tokenizer_tgt.encode(item['translation'][config['lange_tgt']]).ids
+        src_ids = tokenizer_src.encode(item['translation'][config['lang_src']]).ids
+        tgt_ids = tokenizer_tgt.encode(item['translation'][config['lang_tgt']]).ids
         max_len_src = max(max_len_src, len(src_ids))
         max_len_tgt = max(max_len_tgt, len(tgt_ids))
     print(f"Max source length: {max_len_src}, Max target length: {max_len_tgt}")
@@ -145,7 +145,7 @@ def get_ds(config):
 
     return train_loader, val_loader, tokenizer_src, tokenizer_tgt
 
-def get_model(config, vocab_size_src: int, vocab_size_tgt: int):
+def get_model(config, vocab_src_len, vocab_tgt_len):
     """
     Builds and returns a Transformer model using the provided configuration and vocabulary sizes.
 
@@ -158,11 +158,11 @@ def get_model(config, vocab_size_src: int, vocab_size_tgt: int):
         nn.Module: An instance of the Transformer model.
     """
     model = build_transformer(
-        vocab_size_src=vocab_size_src,
-        vocab_size_tgt=vocab_size_tgt,
-        src_seq_len=config['seq_len'],
-        tgt_seq_len=config['seq_len'],
-        d_model=config['d_model']
+        vocab_src_len,
+        vocab_tgt_len,
+        config['seq_len'],
+        config['seq_len'],
+        config['d_model']
     )
     return model
 
