@@ -1,3 +1,6 @@
+from dataset import BilingualDataset, causal_mask
+from model import build_transformer
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -71,34 +74,78 @@ def get_or_build_tokenizer(config, ds, lang):
 
 def get_ds(config):
     """
-    Load dataset and build tokenizers for source and target languages.
+    Loads the dataset and prepares tokenizers and dataloaders for training and validation.
 
     Args:
-        config (dict): Configuration dictionary with language and tokenizer paths.
+        config (dict): Configuration dictionary. Expected keys:
+            - lange_src (str): Source language code (e.g., 'en')
+            - lange_tgt (str): Target language code (e.g., 'de')
+            - tokenizer_file (str): Path template to save/load tokenizers
+            - seq_len (int): Fixed input sequence length for model
+            - batch_size (int): Batch size for training
 
     Returns:
-        Tuple containing:
-            - train_ds_raw: 90% of raw dataset
-            - val_ds_raw: 10% of raw dataset
-            - tokenizer_src: Tokenizer for source language
-            - tokenizer_tgt: Tokenizer for target language
+        Tuple:
+            - train_data_loader (DataLoader): Training set DataLoader
+            - val_data_loader (DataLoader): Validation set DataLoader
+            - tokenizer_src (Tokenizer): Source language tokenizer
+            - tokenizer_tgt (Tokenizer): Target language tokenizer
     """
+    # Load translation dataset from HuggingFace Datasets
     ds_name = 'opus_books'
     lang_pair = f"{config['lange_src']}-{config['lange_tgt']}"
     ds_raw = load_dataset(ds_name, lang_pair, split='train')
-    
-    # Build Tokenizer
+
+    # Build or load tokenizers for both source and target languages
     tokenizer_src = get_or_build_tokenizer(config, ds_raw, config['lange_src'])
     tokenizer_tgt = get_or_build_tokenizer(config, ds_raw, config['lange_tgt'])
 
-    # Keep 90% of the dataset for training and 10% for validation
-    train_ds_size = int(0.9 * len(ds_raw))
-    val_ds_size = len(ds_raw) - train_ds_size
-    train_ds_raw, val_ds_raw = random_split(ds_raw, [train_ds_size, val_ds_size])
-    
-    # Create a custom dataset class
-    """
-    The data set that our model will use to access the tensor directly
-    because we just create the tokenizer, and just loaded the dataset
-    we need to create the tensor that our model will use
-    """
+    # Split dataset: 90% training, 10% validation
+    train_size = int(0.9 * len(ds_raw))
+    val_size = len(ds_raw) - train_size
+    train_raw, val_raw = random_split(ds_raw, [train_size, val_size])
+
+    # Wrap with custom Dataset class to handle tokenization and tensor preparation
+    train_ds = BilingualDataset(
+        ds=train_raw,
+        tokenizer_src=tokenizer_src,
+        tokenizer_tgt=tokenizer_tgt,
+        src_lang=config['lange_src'],
+        tgt_lang=config['lange_tgt'],
+        seq_len=config['seq_len']
+    )
+    val_ds = BilingualDataset(
+        ds=val_raw,
+        tokenizer_src=tokenizer_src,
+        tokenizer_tgt=tokenizer_tgt,
+        src_lang=config['lange_src'],
+        tgt_lang=config['lange_tgt'],
+        seq_len=config['seq_len']
+    )
+
+    # Compute max sequence length in raw dataset (for information/debugging)
+    max_len_src = 0
+    max_len_tgt = 0
+    for item in ds_raw:
+        src_ids = tokenizer_src.encode(item['translation'][config['lange_src']]).ids
+        tgt_ids = tokenizer_tgt.encode(item['translation'][config['lange_tgt']]).ids
+        max_len_src = max(max_len_src, len(src_ids))
+        max_len_tgt = max(max_len_tgt, len(tgt_ids))
+    print(f"📏 Max source length: {max_len_src}, Max target length: {max_len_tgt}")
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=1, shuffle=False)
+
+    return train_loader, val_loader, tokenizer_src, tokenizer_tgt
+
+# Start to build the model
+def get_model(config, vocab_size_src, vocab_size_tgt):
+    model = build_transformer(
+        vocab_size_src,
+        vocab_size_tgt,
+        config['seq_len'],
+        config['seq_len'],
+        config['d_model']
+    )
+    return model
