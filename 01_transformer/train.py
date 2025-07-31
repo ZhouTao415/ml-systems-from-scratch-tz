@@ -376,17 +376,17 @@ def train_model(config):
             optimizer.step()
             optimizer.zero_grad()
 
-            run_validation(
-                model,
-                val_dataloader,
-                tokenizer_src,
-                tokenizer_tgt,
-                config['seq_len'],
-                device,
-                lambda msg: batch_iterator.write(msg),
-                global_step,
-                writer
-            )
+            # run_validation(
+            #     model,
+            #     val_dataloader,
+            #     tokenizer_src,
+            #     tokenizer_tgt,
+            #     config['seq_len'],
+            #     device,
+            #     lambda msg: batch_iterator.write(msg),
+            #     global_step,
+            #     writer
+            # )
 
 
             #  the global step is used for tensorbaord to keep track of the loss
